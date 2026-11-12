@@ -102,7 +102,7 @@ def nba_only(frame):
 
 # Main navigation and controls are across the top; settings live in a popover.
 # Render navigation before the data loading logic so matchup callbacks remain valid.
-nav_items = ['Today’s games', 'Game matchup', 'Statistics', 'Team rankings', 'Projections']
+nav_items = ['Today’s games', 'Game matchup', 'Statistics', 'Team rankings', 'Projections', 'Multi Analyser']
 if st.session_state.get('page') not in nav_items:
     st.session_state['page'] = nav_items[0]
 
@@ -626,6 +626,149 @@ def filters(frame,key):
     if choice=='Away':frame=frame[~frame.home]
     return frame
 
+
+if st.session_state['page'] == 'Multi Analyser':
+    import numpy as np
+    page_banner('Multi Analyser', 'Build player-stat legs • experimental historical probability estimates')
+    st.caption('Research tool only. No Sportsbet connection, bookmaker odds, or guarantee of outcomes. The estimates are not calibrated forecasts.')
+    local_today = dt.datetime.now(ZoneInfo('Australia/Sydney')).date()
+    # Reuse the same game schedule as the home page, including tomorrow.
+    if st.session_state.get('multi_schedule_day') != str(local_today):
+        try:
+            today_list = sydney_games(local_today)
+            tomorrow_list = sydney_games(local_today + dt.timedelta(days=1))
+            st.session_state['multi_games'] = today_list + tomorrow_list
+            st.session_state['multi_schedule_day'] = str(local_today)
+            st.session_state.pop('multi_schedule_error', None)
+        except Exception as exc:
+            st.session_state['multi_schedule_error'] = str(exc)
+    if st.session_state.get('multi_schedule_error'):
+        st.warning('Live schedule unavailable: ' + st.session_state['multi_schedule_error'])
+    schedule = st.session_state.get('multi_games', [])
+    # Also support a matchup opened on the home page, if the schedule changed.
+    for saved_game in st.session_state.get('today_games', []):
+        if not any(g['ESPN game ID'] == saved_game['ESPN game ID'] for g in schedule):
+            schedule.append(saved_game)
+    if not schedule:
+        st.info('No games available for today or tomorrow. Open Today’s games and refresh the schedule.')
+        st.stop()
+    game_labels = {str(g['ESPN game ID']): f"{g['Away']} vs {g['Home']} · {g['Sydney date']} {g['Sydney time']} Sydney" for g in schedule}
+    selected_id = st.selectbox('Choose game', list(game_labels), format_func=lambda k: game_labels[k], key='multi_game_id')
+    game = next(g for g in schedule if str(g['ESPN game ID']) == selected_id)
+    matchup_date = dt.date.fromisoformat(game['Sydney date'])
+    away, home = game['Away'], game['Home']
+    st.markdown(f'### {away} vs {home}')
+    # Use only historical appearances strictly BEFORE the selected matchup.
+    hist = p.copy()
+    hist['game_date'] = pd.to_datetime(hist['date'], errors='coerce').dt.date
+    hist = hist[(hist['game_date'].notna()) & (hist['game_date'] < matchup_date) & (hist['min'] > 0)]
+    hist = hist[hist['team'].isin([away, home])].copy()
+    if hist.empty:
+        st.warning('No earlier player game history for these teams in the selected season. Update the season data or select another game.')
+        st.stop()
+    hist = hist.sort_values(['game_date','game_id'], ascending=False)
+    # Limit selections to players in each team's most recent available game, matching existing projection logic.
+    eligible = []
+    for team_name in [away, home]:
+        team_history = hist[hist['team'] == team_name]
+        if team_history.empty:
+            continue
+        latest_game_id = str(team_history.iloc[0]['game_id'])
+        roster = team_history[team_history['game_id'].astype(str) == latest_game_id]
+        eligible.extend(roster['player_id'].astype(str).tolist())
+    roster_history = hist[hist['player_id'].astype(str).isin(set(eligible))].copy()
+    players = (roster_history.drop_duplicates('player_id').set_index('player_id')['player'].to_dict())
+    teams_by_player = (roster_history.drop_duplicates('player_id').set_index('player_id')['team'].to_dict())
+    player_ids = sorted(players, key=lambda pid: (teams_by_player[pid], players[pid]))
+    if not player_ids:
+        st.info('No recent roster players found in the saved game history.')
+        st.stop()
+    stats = {'Points':'pts','Rebounds':'reb','Assists':'ast','3-pointers made':'threem','Steals':'stl','Blocks':'blk','Turnovers':'tov'}
+    st.markdown('#### Build your multi')
+    if 'multi_leg_count' not in st.session_state:
+        st.session_state['multi_leg_count'] = 2
+    ctl1, ctl2, _ = st.columns([1,1,4])
+    with ctl1:
+        if st.button('＋ Add leg', disabled=st.session_state['multi_leg_count'] >= 10, use_container_width=True):
+            st.session_state['multi_leg_count'] += 1
+            st.rerun()
+    with ctl2:
+        if st.button('− Remove last', disabled=st.session_state['multi_leg_count'] <= 1, use_container_width=True):
+            st.session_state['multi_leg_count'] -= 1
+            st.rerun()
+    legs = []
+    for i in range(st.session_state['multi_leg_count']):
+        with st.container(border=True):
+            st.markdown(f'**Leg {i+1}**')
+            c1,c2,c3,c4 = st.columns([2.5,1.5,1.3,1])
+            with c1:
+                pid = st.selectbox('Player', player_ids, format_func=lambda k: f"{players[k]} ({teams_by_player[k]})", key=f'multi_player_{i}')
+            with c2:
+                stat_name = st.selectbox('Statistic', list(stats), key=f'multi_stat_{i}')
+            with c3:
+                direction = st.selectbox('Target', ['At least', 'Under'], key=f'multi_dir_{i}')
+            with c4:
+                line = st.number_input('Line', min_value=0, max_value=250, value=20 if stat_name=='Points' else 5, step=1, key=f'multi_line_{i}')
+            legs.append((pid, stats[stat_name], stat_name, direction, int(line)))
+    recent_n = st.selectbox('Recent-form sample', [5,10,20], index=1, key='multi_recent_n')
+    st.caption('At least 20 = 20 or more. Under 20 = fewer than 20. These are integer-stat thresholds, not Sportsbet decimal lines.')
+    if st.button('Analyse multi', type='primary', use_container_width=True):
+        results = []
+        leg_events = []
+        for pid, stat, stat_name, direction, line in legs:
+            player_games = roster_history[roster_history['player_id'].astype(str) == str(pid)].copy()
+            player_games = player_games.sort_values(['game_date','game_id'], ascending=False).drop_duplicates('game_id')
+            values = pd.to_numeric(player_games[stat], errors='coerce').dropna()
+            if len(values) < 3:
+                st.warning(f'{players[pid]}: fewer than 3 historical appearances. Cannot estimate this multi reliably.')
+                st.stop()
+            hits = (values >= line) if direction == 'At least' else (values < line)
+            recent_hits = hits.head(recent_n)
+            # Shrink short-sample recent form toward the full-season hit rate.
+            # This is an explicit heuristic, NOT a calibrated probability model.
+            season_rate = hits.mean()
+            recent_rate = recent_hits.mean()
+            estimate = (len(recent_hits)*recent_rate + 12*season_rate)/(len(recent_hits)+12)
+            results.append({'Leg':f"{players[pid]} · {direction} {line} {stat_name}",
+                            'Games':len(hits), 'Season hit %':round(100*season_rate,1),
+                            f'Last {recent_n} hit %':round(100*recent_rate,1),
+                            'Estimated hit %':round(100*estimate,1)})
+            leg_events.append({'pid':str(pid), 'stat':stat, 'direction':direction, 'line':line,
+                               'estimate':float(estimate), 'games':player_games})
+        st.markdown('#### Individual legs')
+        st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
+        # Historical same-game co-hits are only meaningful for players who actually
+        # appeared in the SAME completed game. Never treat unrelated games as joint hits.
+        all_game_sets = [set(ev['games']['game_id'].astype(str)) for ev in leg_events]
+        common_ids = set.intersection(*all_game_sets) if all_game_sets else set()
+        joint_hits = []
+        for gid in common_ids:
+            outcomes = []
+            for ev in leg_events:
+                row = ev['games'][ev['games']['game_id'].astype(str) == gid]
+                if row.empty:
+                    break
+                val = float(row.iloc[0][ev['stat']])
+                outcomes.append(val >= ev['line'] if ev['direction']=='At least' else val < ev['line'])
+            if len(outcomes) == len(leg_events):
+                joint_hits.append(all(outcomes))
+        # Independent product is shown as a baseline only. Same-game legs can be
+        # correlated, so it is not represented as a validated joint prediction.
+        baseline = float(np.prod([ev['estimate'] for ev in leg_events]))
+        m1,m2 = st.columns(2)
+        m1.metric('Independence-model estimate*', f'{100*baseline:.1f}%')
+        if len(common_ids) >= 5:
+            empirical = float(np.mean(joint_hits))
+            m2.metric('Historical joint hit rate', f'{100*empirical:.1f}%')
+            st.caption(f'Historical joint hit rate: {sum(joint_hits)} of {len(joint_hits)} games where every selected player appeared together. Small samples can be highly unstable.')
+        else:
+            m2.metric('Historical joint hit rate', 'Insufficient data')
+            st.caption(f'Only {len(common_ids)} common historical games across these players; at least 5 are needed to display a joint hit rate.')
+        st.warning('*The independence-model estimate multiplies heuristic leg probabilities and DOES NOT account for same-game correlation, injuries, lineup changes, minutes restrictions, or uncertainty in the estimates. It is not a reliable prediction of the multi hitting.')
+        if len({(ev['pid'],ev['stat']) for ev in leg_events}) < len(leg_events):
+            st.info('Some legs concern the same player and statistic. They are strongly dependent; the independence estimate is especially misleading.')
+        st.caption('Players are drawn from their team’s most recent saved box score, not confirmed game-day lineups. Historical data is filtered to before the selected game to avoid look-ahead bias. The current pace proxy is not used because it omits offensive rebounds.')
+    st.stop()
 
 if st.session_state['page'] == 'Statistics':
     page_banner('Player & Team Statistics', 'Position defence • player averages • opponent analysis')
