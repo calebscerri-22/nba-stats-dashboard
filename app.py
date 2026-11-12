@@ -251,11 +251,11 @@ if st.session_state['page'] == 'Game matchup':
         st.markdown('#### Explore this matchup')
         matchup_view = st.selectbox(
             'Analysis section',
-            ['Overview', 'Recent form', 'Injuries', 'Team rankings', 'Position defence', 'Projections'],
+            ['Overview', 'Team Stats', 'Player Stats'],
             key='matchup_view',
             label_visibility='collapsed',
         )
-        st.caption('Choose a section to focus on one set of statistics at a time.')
+        st.caption('Overview: team overview, injuries and recent form · Team Stats: rankings and position stats · Player Stats: player projections')
         summary_cols = st.columns(2)
         for summary_col, summary_team in zip(summary_cols, game_teams):
             team_rows = gt.loc[gt['team'].eq(summary_team)]
@@ -268,7 +268,28 @@ if st.session_state['page'] == 'Game matchup':
                     st.caption(f"{standing['Conference']} conference · #{int(standing['Conference place'])} estimated")
                 else:
                     st.caption('Record unavailable')
-        if matchup_view == 'Injuries':
+        if matchup_view == 'Overview':
+            st.subheader('Team matchup overview')
+            overview=[]
+            for team,opp in [(away,home),(home,away)]:
+                own=gt[gt.team==team].sort_values('date',ascending=False)
+                defend=gt[gt.team==opp].sort_values('date',ascending=False)
+                team_id = str(own.iloc[0]['team_id']).strip()
+                standing = standings_by_id.loc[team_id] if team_id in standings_by_id.index else None
+                overview.append({'Team':team,
+                                 'W–L': f"{int(standing['Wins'])}–{int(standing['Losses'])}" if standing is not None else '—',
+                                 'Conference': standing['Conference'] if standing is not None else '—',
+                                 'Conf. place*': f"#{int(standing['Conference place'])}" if standing is not None else '—',
+                                 'Win %': round(standing['Win pct']*100,1) if standing is not None else None,
+                                 'Games':len(own),'Points scored / game':round(own.points.mean(),1),
+                                 'Points allowed / game':round(own.opp_points.mean(),1),
+                                 'Opponent allows / game':round(defend.opp_points.mean(),1),
+                                 'Estimated points*':round((.65*own.points.mean()+.35*own.head(10).points.mean()+.65*defend.opp_points.mean()+.35*defend.head(10).opp_points.mean())/2,1) if len(own)>=3 and len(defend)>=3 else None})
+            st.dataframe(pd.DataFrame(overview),hide_index=True,use_container_width=True)
+            st.caption('*Experimental estimate based on season and recent scoring plus opponent points allowed. Not a validated forecast.')
+            st.caption('*Conference positions are estimated from the completed NBA games in your local database; official NBA tiebreakers may differ.')
+
+        if matchup_view == 'Overview':
             st.subheader('Injury report')
             st.caption('Current league-wide ESPN injury listings, not a confirmed game-day inactive list. '
                        'Out means reported out; Questionable and Doubtful remain uncertain.')
@@ -317,27 +338,6 @@ if st.session_state['page'] == 'Game matchup':
                        'Injuries are not yet factored into player projections.')
 
         if matchup_view == 'Overview':
-            st.subheader('Team matchup overview')
-            overview=[]
-            for team,opp in [(away,home),(home,away)]:
-                own=gt[gt.team==team].sort_values('date',ascending=False)
-                defend=gt[gt.team==opp].sort_values('date',ascending=False)
-                team_id = str(own.iloc[0]['team_id']).strip()
-                standing = standings_by_id.loc[team_id] if team_id in standings_by_id.index else None
-                overview.append({'Team':team,
-                                 'W–L': f"{int(standing['Wins'])}–{int(standing['Losses'])}" if standing is not None else '—',
-                                 'Conference': standing['Conference'] if standing is not None else '—',
-                                 'Conf. place*': f"#{int(standing['Conference place'])}" if standing is not None else '—',
-                                 'Win %': round(standing['Win pct']*100,1) if standing is not None else None,
-                                 'Games':len(own),'Points scored / game':round(own.points.mean(),1),
-                                 'Points allowed / game':round(own.opp_points.mean(),1),
-                                 'Opponent allows / game':round(defend.opp_points.mean(),1),
-                                 'Estimated points*':round((.65*own.points.mean()+.35*own.head(10).points.mean()+.65*defend.opp_points.mean()+.35*defend.head(10).opp_points.mean())/2,1) if len(own)>=3 and len(defend)>=3 else None})
-            st.dataframe(pd.DataFrame(overview),hide_index=True,use_container_width=True)
-            st.caption('*Experimental estimate based on season and recent scoring plus opponent points allowed. Not a validated forecast.')
-            st.caption('*Conference positions are estimated from the completed NBA games in your local database; official NBA tiebreakers may differ.')
-
-        if matchup_view == 'Recent form':
             st.subheader('Last 5 games & back-to-back schedule')
             st.caption('Results are shown from each team’s perspective. Consecutive calendar dates indicate a back-to-back.')
             matchup_date = dt.date.fromisoformat(selected_game.get('Sydney date', dt.datetime.now(ZoneInfo('Australia/Sydney')).date().isoformat()))
@@ -376,7 +376,7 @@ if st.session_state['page'] == 'Game matchup':
                 st.dataframe(pd.DataFrame(recent_rows), hide_index=True, use_container_width=True)
             st.caption('All displayed game dates and rest-day gaps use Australia/Sydney time (AEDT/AEST automatically). Rest days use calendar dates, not travel or hours between tipoffs.')
 
-        if matchup_view == 'Team rankings':
+        if matchup_view == 'Team Stats':
             st.subheader('Team rankings across all statistics')
             st.caption('Each statistic shows the team’s average per game and league rank on offence and defence. Offensive rank #1 = most produced; defensive rank #1 = least allowed.')
             matchup_metrics = {
@@ -441,7 +441,7 @@ if st.session_state['page'] == 'Game matchup':
             if len(league_metric) < 30:
                 st.warning(f'Rankings currently include {len(league_metric)} NBA teams with data (out of 30).')
             st.caption('Non-point metrics use available ESPN player box scores. Missing player data can affect averages.')
-        if matchup_view == 'Position defence':
+        if matchup_view == 'Team Stats':
             st.subheader('Defence against each position')
             pos_stats={'pts':'PTS','reb':'REB','ast':'AST','threem':'3PM','stl':'STL','blk':'BLK'}
             positions=['PG','SG','SF','PF','C']
@@ -513,7 +513,7 @@ if st.session_state['page'] == 'Game matchup':
             st.markdown(table_html, unsafe_allow_html=True)
 
             st.caption('Allowed = combined opponent production at that position per game. Vs normal = difference from those same players’ season averages; positive means more allowed than normal, negative means less. Positions come from the depth chart, not actual defensive assignments.')
-        if matchup_view == 'Projections':
+        if matchup_view == 'Player Stats':
             st.subheader('Player matchup projections')
             window=st.selectbox('Recent games used for projections',[5,10,20],index=1,key='game_recent_window')
             rows=[]
