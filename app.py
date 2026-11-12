@@ -385,6 +385,7 @@ if st.session_state['page'] == 'Game matchup':
                 'Steals': 'stl', 'Blocks': 'blk', 'Turnovers': 'tov',
                 'Field goals made': 'fgm', 'Field goals attempted': 'fga',
                 'Free throws made': 'ftm', 'Free throws attempted': 'fta',
+                'Pace (estimated)': 'pace_proxy',
             }
             selected_metric = st.selectbox('Choose team ranking statistic', list(matchup_metrics), key='matchup_team_metric')
             stat_col = matchup_metrics[selected_metric]
@@ -400,7 +401,26 @@ if st.session_state['page'] == 'Game matchup':
             team_ids_by_name = (ranking_gt.dropna(subset=['team_id', 'team'])
                                 .drop_duplicates('team')
                                 .set_index('team')['team_id'].astype(str).to_dict())
-            if stat_col == 'pts':
+            if stat_col == 'pace_proxy':
+                # The current ESPN player cache has no reliable offensive-rebound split.
+                # Thus this is a possessions-per-48 proxy, NOT official NBA pace.
+                player_games = ranking_gp.copy()
+                for field in ['fga', 'fta', 'tov', 'min']:
+                    player_games[field] = pd.to_numeric(player_games[field], errors='coerce')
+                player_games['team_id'] = player_games['team_id'].astype(str)
+                player_games['opponent_id'] = player_games['opponent_id'].astype(str)
+                totals = player_games.groupby(['game_id', 'team_id', 'opponent_id'], as_index=False)[['fga', 'fta', 'tov', 'min']].sum(min_count=1)
+                totals['possessions_proxy'] = totals['fga'] + 0.44 * totals['fta'] + totals['tov']
+                # Five player-minutes equal one elapsed game minute. Use the actual
+                # duration when valid to account for overtime and incomplete boxes.
+                totals['game_minutes'] = totals['min'] / 5
+                totals['pace_proxy'] = (totals['possessions_proxy'] * 48 / totals['game_minutes']).where(
+                    totals['game_minutes'].between(40, 60) & totals['possessions_proxy'].notna())
+                produced = totals.groupby('team_id')['pace_proxy'].mean()
+                # Pace is shared by both teams; a defensive 'allowed' pace ranking
+                # would be misleading, so do not invent one.
+                conceded = pd.Series(dtype=float)
+            elif stat_col == 'pts':
                 # Points come from team scores, not player box-score sums.
                 team_stats = ranking_gt.copy()
                 team_stats['team_id'] = team_stats['team_id'].astype(str)
@@ -437,7 +457,26 @@ if st.session_state['page'] == 'Game matchup':
                     'Defence rank': int(r['Defence rank']) if pd.notna(r['Defence rank']) else None,
                     'Allowed rank (most = 1)': int(r['Allowed rank (most = 1)']) if pd.notna(r['Allowed rank (most = 1)']) else None,
                 })
-            st.dataframe(pd.DataFrame(metric_rows), hide_index=True, use_container_width=True)
+            if stat_col == 'pace_proxy':
+                pace_rows = []
+                for team_name in game_teams:
+                    team_id = team_ids_by_name.get(team_name)
+                    if team_id not in league_metric.index:
+                        continue
+                    r = league_metric.loc[team_id]
+                    pace_rows.append({'Team': team_name,
+                                      'Estimated pace / 48 min': round(r['Produced'], 1) if pd.notna(r['Produced']) else None,
+                                      'League pace rank': int(r['Offence rank']) if pd.notna(r['Offence rank']) else None})
+                st.dataframe(pd.DataFrame(pace_rows), hide_index=True, use_container_width=True)
+                values = [r['Estimated pace / 48 min'] for r in pace_rows if r['Estimated pace / 48 min'] is not None]
+                if len(values) == 2:
+                    st.metric('Simple matchup pace proxy', f'{sum(values) / 2:.1f}')
+                st.caption('Estimated pace proxy = (FGA + 0.44 × FTA + TOV) × 48 / elapsed game minutes. '
+                           'Offensive rebounds are unavailable in the cached box scores, so this OVERSTATES possessions '
+                           'and is NOT official NBA pace. Missing or incomplete player minutes can also affect accuracy. '
+                           'Ranking #1 indicates the highest estimated pace.')
+            else:
+                st.dataframe(pd.DataFrame(metric_rows), hide_index=True, use_container_width=True)
             if len(league_metric) < 30:
                 st.warning(f'Rankings currently include {len(league_metric)} NBA teams with data (out of 30).')
             st.caption('Non-point metrics use available ESPN player box scores. Missing player data can affect averages.')
