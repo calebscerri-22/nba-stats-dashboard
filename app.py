@@ -42,6 +42,24 @@ button[data-baseweb="tab"][aria-selected="true"] {color:white; border-bottom:3px
 .sixers-title {font-size:clamp(1.55rem,3vw,2.5rem); font-weight:850; color:#FFFFFF; line-height:1.2;}
 .sixers-subtitle {color:#D3DFEF; font-size:.94rem; margin-top:6px;}
 .sixers-game {background:#14233B; border:1px solid #2B4261; border-left:4px solid #006BB6; border-radius:12px; padding:17px 20px; margin:5px 0; min-height:94px;}
+/* The whole matchup card is a native Streamlit button, fully clickable. */
+[class*="st-key-matchup_card_"] button {
+    width:100%; min-height:94px; padding:18px 22px;
+    background:#14233B !important; color:#FFFFFF !important;
+    border:1px solid #2B4261 !important; border-left:4px solid #006BB6 !important;
+    border-radius:12px !important; text-align:left !important;
+    justify-content:flex-start !important; transition:background .15s,border-color .15s,transform .15s;
+}
+[class*="st-key-matchup_card_"] button:hover,
+[class*="st-key-matchup_card_"] button:focus-visible {
+    background:#1B3556 !important; border-color:#ED174C !important;
+    border-left-color:#ED174C !important; transform:translateY(-1px);
+}
+[class*="st-key-matchup_card_"] button p {
+    color:#FFFFFF !important; text-align:left !important;
+    white-space:pre-line !important; line-height:1.75 !important;
+    font-size:1rem !important; font-weight:650 !important;
+}
 .sixers-game-name {color:white; font-size:1.1rem; font-weight:750;}
 .sixers-game-meta {color:#B9C9DF; font-size:.84rem; margin-top:7px;}
 .matchup-pos-scroll {border-color:#2B4261 !important;}
@@ -158,13 +176,14 @@ if st.session_state['page'] == 'Today’s games':
     else:
         st.caption('Select a matchup to open its dedicated analysis page.')
         for idx, game in enumerate(st.session_state['today_games']):
-            c1,c3=st.columns([5,1.5], vertical_alignment='center')
-            with c1:
-                from html import escape
-                st.markdown(f"<div class='sixers-game'><div class='sixers-game-name'>{escape(str(game['Away']))} <span style='color:#ED174C'>@</span> {escape(str(game['Home']))}</div><div class='sixers-game-meta'>{escape(str(game['Sydney time']))} · {escape(str(game['Status']))}</div></div>", unsafe_allow_html=True)
-            with c3:
-                st.button('View matchup →', key=f"open_game_{game['ESPN game ID']}",
-                          on_click=open_matchup, args=(game['ESPN game ID'],))
+            # Make the entire matchup card clickable; no separate View matchup button.
+            st.button(
+                f"{game['Away']}  vs  {game['Home']}\n{game['Sydney time']} · {game['Status']}",
+                key=f"matchup_card_{idx}",
+                on_click=open_matchup,
+                args=(game['ESPN game ID'],),
+                use_container_width=True,
+            )
     st.stop()
 
 if st.session_state['page'] == 'Game matchup':
@@ -180,7 +199,7 @@ if st.session_state['page'] == 'Game matchup':
         st.button('← Close game analysis', on_click=navigate_to,
                   args=('Today’s games', True))
         if 'data' not in st.session_state:
-            st.info('Click **Update latest games** in the sidebar to download this season. Afterwards it loads automatically from SQLite.')
+            st.info('Click **Update latest games** at the top to download this season. Afterwards it loads automatically from SQLite.')
             st.stop()
         gp,gt,gn,ge,gy,gtype=st.session_state['data']
         gp, gt = nba_only_records(gp), nba_only_records(gt)
