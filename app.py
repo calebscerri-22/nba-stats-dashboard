@@ -5,7 +5,7 @@ from espn import load, averages, sydney_games, cache_status, nba_only_records, n
 from positions import apply_player_positions, CSV as POSITIONS_CSV
 from zoneinfo import ZoneInfo
 
-st.set_page_config(page_title='NBA Analytics | Sixers Edition',page_icon='🏀',layout='wide', initial_sidebar_state='expanded')
+st.set_page_config(page_title='NBA Analytics | Sixers Edition',page_icon='🏀',layout='wide', initial_sidebar_state='collapsed')
 
 # Presentation-only redesign: the ESPN data pipeline and analytics remain unchanged.
 st.markdown("""
@@ -13,8 +13,8 @@ st.markdown("""
 :root { color-scheme: dark; }
 .stApp, [data-testid="stAppViewContainer"] {background: #0B1426; color: #F8FAFC;}
 [data-testid="stHeader"] {background: rgba(11,20,38,.92);}
-[data-testid="stSidebar"] {background: #101D34; border-right: 1px solid #263957;}
-[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {color:#FFFFFF;}
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] {display:none !important;}
+
 .block-container {padding-top: 1.65rem; padding-bottom: 3rem; max-width: 1550px;}
 h1,h2,h3 {color:#FFFFFF !important; letter-spacing:-.025em;}
 h1 {font-weight:800 !important;}
@@ -33,8 +33,10 @@ p, label, [data-testid="stCaptionContainer"] {color:#C9D6E8;}
 [data-baseweb="tab-list"] {gap:10px;}
 button[data-baseweb="tab"] {color:#B7C9DF; background:#172841; border-radius:9px 9px 0 0;}
 button[data-baseweb="tab"][aria-selected="true"] {color:white; border-bottom:3px solid #ED174C;}
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {background:#183B63; border-left:3px solid #ED174C; border-radius:6px;}
-[data-testid="stSidebar"] [role="radiogroup"] label {padding:5px 9px;}
+[role="radiogroup"] label:has(input:checked) {background:#006BB6; border-bottom:3px solid #ED174C; border-radius:8px;}
+[role="radiogroup"] label {padding:7px 10px;}
+.sixers-topbrand {font-size:1.35rem;font-weight:850;color:#FFFFFF;letter-spacing:.03em;margin-bottom:14px;}
+.sixers-topbrand span {font-size:.7rem;font-weight:700;color:#ED174C;margin-left:12px;letter-spacing:.12em;}
 .sixers-hero {padding:23px 27px; border:1px solid #284362; border-left:5px solid #ED174C; border-radius:16px; background:linear-gradient(115deg,#153C69 0%,#13243E 55%,#25182E 100%); margin-bottom:20px;}
 .sixers-eyebrow {font-size:.75rem; font-weight:800; letter-spacing:.19em; color:#F4A2B8; margin-bottom:5px;}
 .sixers-title {font-size:clamp(1.55rem,3vw,2.5rem); font-weight:850; color:#FFFFFF; line-height:1.2;}
@@ -55,7 +57,6 @@ def page_banner(title, subtitle):
     from html import escape
     st.markdown(f'<div class="sixers-hero"><div class="sixers-eyebrow">NBA ANALYTICS • SIXERS EDITION</div><div class="sixers-title">{escape(title)}</div><div class="sixers-subtitle">{escape(subtitle)}</div></div>', unsafe_allow_html=True)
 
-page_banner('NBA Analytics', 'Game-by-game insights • ESPN data • Philadelphia-inspired design')
 
 # NBA franchise ESPN team IDs (exclude exhibition opponents such as London Lions).
 NBA_TEAM_IDS = {str(i) for i in range(1, 31)}
@@ -67,23 +68,35 @@ def nba_only(frame):
     opp_ids = frame['opponent_id'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
     return frame.loc[ids.isin(NBA_TEAM_IDS) & opp_ids.isin(NBA_TEAM_IDS)].copy()
 
-with st.sidebar:
-    st.markdown('### 🏀 NBA ANALYTICS')
-    st.caption('RED • BLUE • WHITE')
-    st.header('Data settings')
-    current_year = dt.date.today().year
-    current_end_year = current_year + 1 if dt.date.today().month >= 10 else current_year
-    season_labels = [f'{year-1}–{str(year)[-2:]}' for year in range(current_end_year, 2014, -1)]
-    season_label = st.selectbox('NBA season (October–June)', season_labels)
-    season = int(season_label[:4]) + 1
-    season_type=st.selectbox('Season type',['Regular season','Playoffs'])
-    season_key=(int(season),2 if season_type=='Regular season' else 3)
-    status=cache_status(*season_key)
-    st.caption(f"Saved: {status['boxscores_saved']}/{status['games_found']} game box scores · scanned through {status['scanned_through'] or 'never'}")
-    st.caption('SQLite file: nba_cache.sqlite (kept beside the dashboard).')
-    go=st.button('Update latest games',type='primary')
-    full=st.button('Full season refresh')
-    st.caption('Saved data opens automatically. Update latest games checks only recent/new dates; full refresh re-downloads everything.')
+# Main navigation and controls are across the top; settings live in a popover.
+# Render navigation before the data loading logic so matchup callbacks remain valid.
+nav_items = ['Today’s games', 'Game matchup', 'Statistics', 'Team rankings', 'Projections']
+if st.session_state.get('page') not in nav_items:
+    st.session_state['page'] = nav_items[0]
+
+st.markdown('<div class="sixers-topbrand">🏀 NBA ANALYTICS <span>RED • BLUE • WHITE</span></div>', unsafe_allow_html=True)
+nav_col, update_col, settings_col = st.columns([6, 1.6, 1.15], vertical_alignment='bottom')
+with nav_col:
+    st.radio('Navigation', nav_items, key='page', horizontal=True, label_visibility='collapsed')
+with update_col:
+    go = st.button('↻ Update latest games', type='primary', use_container_width=True)
+with settings_col:
+    with st.popover('⚙ Settings', use_container_width=True):
+        st.markdown('### Data settings')
+        sydney_now = dt.datetime.now(ZoneInfo('Australia/Sydney')).date()
+        current_end_year = sydney_now.year + 1 if sydney_now.month >= 10 else sydney_now.year
+        season_labels = [f'{year-1}–{str(year)[-2:]}' for year in range(current_end_year, 2014, -1)]
+        season_label = st.selectbox('NBA season (October–June)', season_labels, key='selected_season')
+        season_type = st.selectbox('Season type', ['Regular season', 'Playoffs'], key='selected_season_type')
+        season = int(season_label[:4]) + 1
+        season_key = (int(season), 2 if season_type == 'Regular season' else 3)
+        status = cache_status(*season_key)
+        st.caption(f"Saved: {status['boxscores_saved']}/{status['games_found']} game box scores · scanned through {status['scanned_through'] or 'never'}")
+        st.caption('SQLite file: nba_cache.sqlite (kept beside the dashboard).')
+        full = st.button('Full season refresh', use_container_width=True)
+        st.caption('Saved data opens automatically. Update latest games checks recent/new dates; full refresh re-downloads everything.')
+
+page_banner('NBA Analytics', 'Game-by-game insights • ESPN data • Philadelphia-inspired design')
 
 # On first launch or when changing seasons, read the SQLite cache without network.
 if st.session_state.get('loaded_key') != season_key:
@@ -118,12 +131,6 @@ def navigate_to(page, clear_game=False):
     if clear_game:
         st.session_state.pop('selected_game_id', None)
     st.session_state['page'] = page
-
-# Navigation is kept in session state so selecting a game opens a separate view.
-with st.sidebar:
-    st.divider()
-    st.header('Navigation')
-    st.radio('Open page', ['Today’s games', 'Game matchup', 'Statistics', 'Team rankings', 'Projections'], key='page', label_visibility='collapsed')
 
 if st.session_state['page'] == 'Today’s games':
     page_banner('Game Day', 'NBA schedule • Australia/Sydney time')
