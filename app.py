@@ -5,9 +5,57 @@ from espn import load, averages, sydney_games, cache_status, nba_only_records, n
 from positions import apply_player_positions, CSV as POSITIONS_CSV
 from zoneinfo import ZoneInfo
 
-st.set_page_config(page_title='NBA Analytics | ESPN',page_icon='🏀',layout='wide')
-st.title('🏀 NBA Analytics')
-st.caption('Unofficial ESPN data • game-by-game box score analytics')
+st.set_page_config(page_title='NBA Analytics | Sixers Edition',page_icon='🏀',layout='wide', initial_sidebar_state='expanded')
+
+# Presentation-only redesign: the ESPN data pipeline and analytics remain unchanged.
+st.markdown("""
+<style>
+:root { color-scheme: dark; }
+.stApp, [data-testid="stAppViewContainer"] {background: #0B1426; color: #F8FAFC;}
+[data-testid="stHeader"] {background: rgba(11,20,38,.92);}
+[data-testid="stSidebar"] {background: #101D34; border-right: 1px solid #263957;}
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {color:#FFFFFF;}
+.block-container {padding-top: 1.65rem; padding-bottom: 3rem; max-width: 1550px;}
+h1,h2,h3 {color:#FFFFFF !important; letter-spacing:-.025em;}
+h1 {font-weight:800 !important;}
+h2,h3 {border-left: 4px solid #ED174C; padding-left: .65rem;}
+p, label, [data-testid="stCaptionContainer"] {color:#C9D6E8;}
+[data-testid="stVerticalBlockBorderWrapper"] > div[data-testid="stVerticalBlock"] {background:#14233B; border-radius:14px;}
+[data-testid="stMetric"] {background:#14233B; border:1px solid #294160; border-top:3px solid #006BB6; border-radius:12px; padding:14px 18px;}
+[data-testid="stMetricValue"] {color:#FFFFFF;}
+[data-testid="stMetricLabel"] {color:#B7C9DF;}
+.stButton > button[kind="primary"] {background:#006BB6; color:white; border:1px solid #2987D1; font-weight:700;}
+.stButton > button[kind="primary"]:hover {background:#087DD0; border-color:#FFFFFF;}
+.stButton > button[kind="secondary"] {background:#192C48; color:#FFFFFF; border:1px solid #365273;}
+.stButton > button[kind="secondary"]:hover {border-color:#ED174C; color:#FFFFFF;}
+[data-testid="stDataFrame"], [data-testid="stTable"] {border:1px solid #2B4261; border-radius:12px; overflow:hidden;}
+[data-testid="stAlert"] {border-radius:12px;}
+[data-baseweb="tab-list"] {gap:10px;}
+button[data-baseweb="tab"] {color:#B7C9DF; background:#172841; border-radius:9px 9px 0 0;}
+button[data-baseweb="tab"][aria-selected="true"] {color:white; border-bottom:3px solid #ED174C;}
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {background:#183B63; border-left:3px solid #ED174C; border-radius:6px;}
+[data-testid="stSidebar"] [role="radiogroup"] label {padding:5px 9px;}
+.sixers-hero {padding:23px 27px; border:1px solid #284362; border-left:5px solid #ED174C; border-radius:16px; background:linear-gradient(115deg,#153C69 0%,#13243E 55%,#25182E 100%); margin-bottom:20px;}
+.sixers-eyebrow {font-size:.75rem; font-weight:800; letter-spacing:.19em; color:#F4A2B8; margin-bottom:5px;}
+.sixers-title {font-size:clamp(1.55rem,3vw,2.5rem); font-weight:850; color:#FFFFFF; line-height:1.2;}
+.sixers-subtitle {color:#D3DFEF; font-size:.94rem; margin-top:6px;}
+.sixers-game {background:#14233B; border:1px solid #2B4261; border-left:4px solid #006BB6; border-radius:12px; padding:17px 20px; margin:5px 0; min-height:94px;}
+.sixers-game-name {color:white; font-size:1.1rem; font-weight:750;}
+.sixers-game-meta {color:#B9C9DF; font-size:.84rem; margin-top:7px;}
+.matchup-pos-scroll {border-color:#2B4261 !important;}
+.matchup-pos th,.matchup-pos td {background:#14233B !important; color:#F8FAFC !important; border-color:#2B4261 !important;}
+.matchup-pos th {background:#1C3656 !important;}
+.matchup-pos .positive {color:#FF7897 !important;}
+.matchup-pos .negative {color:#61D6AA !important;}
+@media(max-width:700px){.block-container{padding:1rem .8rem}.sixers-hero{padding:18px}.sixers-game-name{font-size:.96rem}}
+</style>
+""", unsafe_allow_html=True)
+
+def page_banner(title, subtitle):
+    from html import escape
+    st.markdown(f'<div class="sixers-hero"><div class="sixers-eyebrow">NBA ANALYTICS • SIXERS EDITION</div><div class="sixers-title">{escape(title)}</div><div class="sixers-subtitle">{escape(subtitle)}</div></div>', unsafe_allow_html=True)
+
+page_banner('NBA Analytics', 'Game-by-game insights • ESPN data • Philadelphia-inspired design')
 
 # NBA franchise ESPN team IDs (exclude exhibition opponents such as London Lions).
 NBA_TEAM_IDS = {str(i) for i in range(1, 31)}
@@ -20,6 +68,8 @@ def nba_only(frame):
     return frame.loc[ids.isin(NBA_TEAM_IDS) & opp_ids.isin(NBA_TEAM_IDS)].copy()
 
 with st.sidebar:
+    st.markdown('### 🏀 NBA ANALYTICS')
+    st.caption('RED • BLUE • WHITE')
     st.header('Data settings')
     current_year = dt.date.today().year
     current_end_year = current_year + 1 if dt.date.today().month >= 10 else current_year
@@ -76,7 +126,7 @@ with st.sidebar:
     st.radio('Open page', ['Today’s games', 'Game matchup', 'Statistics', 'Team rankings', 'Projections'], key='page', label_visibility='collapsed')
 
 if st.session_state['page'] == 'Today’s games':
-    st.header('📅 NBA games — Sydney time')
+    page_banner('Game Day', 'NBA schedule • Australia/Sydney time')
     sydney_today = dt.datetime.now(ZoneInfo('Australia/Sydney')).date()
     selected_day = st.radio('Show games for', ['Today', 'Tomorrow'], horizontal=True,
                             key='schedule_day_choice')
@@ -101,11 +151,10 @@ if st.session_state['page'] == 'Today’s games':
     else:
         st.caption('Select a matchup to open its dedicated analysis page.')
         for idx, game in enumerate(st.session_state['today_games']):
-            c1,c2,c3=st.columns([5,2,2])
+            c1,c3=st.columns([5,1.5], vertical_alignment='center')
             with c1:
-                st.write(f"**{game['Away']} @ {game['Home']}**")
-            with c2:
-                st.caption(f"{game['Sydney time']} · {game['Status']}")
+                from html import escape
+                st.markdown(f"<div class='sixers-game'><div class='sixers-game-name'>{escape(str(game['Away']))} <span style='color:#ED174C'>@</span> {escape(str(game['Home']))}</div><div class='sixers-game-meta'>{escape(str(game['Sydney time']))} · {escape(str(game['Status']))}</div></div>", unsafe_allow_html=True)
             with c3:
                 st.button('View matchup →', key=f"open_game_{game['ESPN game ID']}",
                           on_click=open_matchup, args=(game['ESPN game ID'],))
@@ -119,7 +168,7 @@ if st.session_state['page'] == 'Game matchup':
     selected_game=next((g for g in st.session_state.get('today_games',[]) if g['ESPN game ID']==st.session_state.get('selected_game_id')),None)
     if selected_game:
         st.divider()
-        st.header(f"🏀 {selected_game['Away']} @ {selected_game['Home']}")
+        page_banner(f"{selected_game['Away']} vs {selected_game['Home']}", 'Head-to-head matchup intelligence')
         st.caption(f"{selected_game['Sydney time']} Sydney time · {selected_game['Status']} · ESPN game {selected_game['ESPN game ID']}")
         st.button('← Close game analysis', on_click=navigate_to,
                   args=('Today’s games', True))
@@ -379,7 +428,7 @@ if st.session_state['page'] == 'Game matchup':
             body_rows.append('<tr>' + ''.join(cells) + '</tr>')
         table_html = '''
 <style>
-.matchup-pos-scroll {overflow-x:auto;max-width:100%;border:1px solid #d4d8df;border-radius:8px;}
+.matchup-pos-scroll {overflow-x:auto;max-width:100%;border:1px solid #2B4261;border-radius:8px;}
 .matchup-pos {border-collapse:separate;border-spacing:0;white-space:nowrap;font:14px sans-serif;min-width:1600px;width:100%;}
 .matchup-pos th,.matchup-pos td {padding:10px 12px;border-bottom:1px solid #d4d8df;border-right:1px solid #e5e7eb;background:#fff;color:#222;text-align:right;}
 .matchup-pos th {background:#f1f3f6;position:sticky;top:0;z-index:2;font-weight:600;}
@@ -471,6 +520,7 @@ def filters(frame,key):
 
 
 if st.session_state['page'] == 'Statistics':
+    page_banner('Player & Team Statistics', 'Position defence • player averages • opponent analysis')
     tab1,tab2,tab3,tab4=st.tabs(['Defense vs position','Player vs team','Player averages','Team & opponent'])
     with tab1:
         st.subheader('Stats allowed to opposing positions')
@@ -575,7 +625,7 @@ if st.session_state['page'] == 'Statistics':
 
 if st.session_state['page'] == 'Team rankings':
     st.divider()
-    st.header('🏆 Team matchup rankings (1–30)')
+    page_banner('Team Rankings', 'League-wide offensive and defensive matchup rankings')
     st.caption('Rankings are computed from the loaded season. Offensive rank 1 = most produced; opponent rank 1 = most allowed (easiest matchup). Rankings only cover teams with data; 30-team completeness is shown below.')
     nba_t = nba_only(t)
     nba_p = nba_only(p)
@@ -619,7 +669,7 @@ if st.session_state['page'] == 'Team rankings':
 
 if st.session_state['page'] == 'Projections':
     st.divider()
-    st.header('🎯 Matchup projections')
+    page_banner('Matchup Projections', 'Experimental player and team scoring estimates')
     st.caption('Experimental statistical estimates, not betting advice. Uses historical box scores; no injuries, confirmed lineups, odds, or real-time pace adjustments.')
     left,right,third=st.columns(3)
     with left:
