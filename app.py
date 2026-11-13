@@ -511,8 +511,8 @@ if st.session_state['page'] == 'Game matchup':
             position_team = st.selectbox('Defending team', ['Both teams', away, home], key='matchup_position_team')
             position_columns = ['Defending team', 'Position', 'Games',
                                 f'{position_metric} allowed / game', f'{position_metric} vs normal']
-            # Streamlit's native dataframe does not reliably freeze a non-index column.
-            # Use a horizontally scrollable HTML table with sticky Team and Position columns.
+            # Responsive, content-sized table: compact columns on desktop and
+            # readable label/value cards on narrow phone screens.
             from html import escape as html_escape
             position_table = pd.DataFrame(allowed_rows)[position_columns]
             if position_team != 'Both teams':
@@ -523,7 +523,7 @@ if st.session_state['page'] == 'Game matchup':
                 if signed:
                     return f'{value:+.2f}'
                 return str(value)
-            headers = ''.join(f'<th>{html_escape(str(col))}</th>' for col in position_table.columns)
+            headers = ''.join(f'<th scope="col">{html_escape(str(col))}</th>' for col in position_table.columns)
             body_rows = []
             for _, record in position_table.iterrows():
                 cells = []
@@ -531,21 +531,30 @@ if st.session_state['page'] == 'Game matchup':
                     signed = col.endswith('vs normal')
                     value = display_cell(record[col], signed=signed)
                     css = ' class="positive"' if signed and pd.notna(record[col]) and record[col] > 0 else (' class="negative"' if signed and pd.notna(record[col]) and record[col] < 0 else '')
-                    cells.append(f'<td{css}>{html_escape(value)}</td>')
+                    cells.append(f'<td data-label="{html_escape(str(col), quote=True)}"{css}>{html_escape(value)}</td>')
                 body_rows.append('<tr>' + ''.join(cells) + '</tr>')
             table_html = '''
     <style>
-    .matchup-pos-scroll {overflow-x:auto;max-width:100%;border:1px solid #2B4261;border-radius:8px;}
-    .matchup-pos {border-collapse:separate;border-spacing:0;white-space:nowrap;font:14px sans-serif;min-width:1600px;width:100%;}
-    .matchup-pos th,.matchup-pos td {padding:10px 12px;border-bottom:1px solid #2B4261;border-right:1px solid #2B4261;background:#14233B;color:#F8FAFC;text-align:right;}
-    .matchup-pos th {background:#1C3656;position:sticky;top:0;z-index:2;font-weight:600;}
-    .matchup-pos th:first-child,.matchup-pos td:first-child {position:sticky;left:0;z-index:4;text-align:left;min-width:170px;}
-    .matchup-pos th:nth-child(2),.matchup-pos td:nth-child(2) {position:sticky;left:170px;z-index:4;text-align:left;min-width:80px;font-weight:700;box-shadow:3px 0 5px -4px #555;}
-    .matchup-pos th:first-child,.matchup-pos th:nth-child(2) {z-index:5;background:#1C3656;}
+    .matchup-pos-scroll {max-width:100%;width:100%;overflow-x:auto;border:1px solid #2B4261;border-radius:8px;}
+    .matchup-pos {border-collapse:collapse;table-layout:auto;width:100%;min-width:0;font:clamp(12px,1.1vw,14px) sans-serif;}
+    .matchup-pos th,.matchup-pos td {padding:9px 10px;border-bottom:1px solid #2B4261;background:#14233B;color:#F8FAFC;}
+    .matchup-pos th {background:#1C3656;font-weight:600;white-space:normal;overflow-wrap:normal;line-height:1.25;text-align:right;}
+    .matchup-pos td {white-space:nowrap;text-align:right;}
+    .matchup-pos th:first-child,.matchup-pos td:first-child {text-align:left;}
+    .matchup-pos th:nth-child(2),.matchup-pos td:nth-child(2) {text-align:left;}
     .matchup-pos tr:nth-child(even) td {background:#182B47;}
-    .matchup-pos tr:nth-child(even) td:first-child,.matchup-pos tr:nth-child(even) td:nth-child(2) {background:#182B47;}
     .matchup-pos .positive {color:#FF7897;font-weight:600;}
     .matchup-pos .negative {color:#61D6AA;font-weight:600;}
+    @media(max-width:700px) {
+      .matchup-pos-scroll {border:0;overflow:visible;}
+      .matchup-pos,.matchup-pos tbody,.matchup-pos tr,.matchup-pos td {display:block;width:100%;}
+      .matchup-pos thead {display:none;}
+      .matchup-pos tr {border:1px solid #2B4261;border-radius:10px;overflow:hidden;margin-bottom:10px;background:#14233B;}
+      .matchup-pos td {display:flex;align-items:center;justify-content:space-between;gap:12px;box-sizing:border-box;padding:9px 12px;white-space:normal;text-align:right !important;}
+      .matchup-pos td::before {content:attr(data-label);color:#B7C9DF;font-weight:600;text-align:left;flex:1 1 auto;}
+      .matchup-pos td:first-child {font-weight:700;}
+      .matchup-pos td:last-child {border-bottom:0;}
+    }
     </style>
     <div class="matchup-pos-scroll"><table class="matchup-pos"><thead><tr>''' + headers + '''</tr></thead><tbody>''' + ''.join(body_rows) + '''</tbody></table></div>
     '''
@@ -712,62 +721,146 @@ if st.session_state['page'] == 'Multi Analyser':
             legs.append((pid, stats[stat_name], stat_name, direction, int(line)))
     recent_n = st.selectbox('Recent-form sample', [5,10,20], index=1, key='multi_recent_n')
     st.caption('At least 20 = 20 or more. Under 20 = fewer than 20. These are integer-stat thresholds, not Sportsbet decimal lines.')
+    # ESPN injuries are current league-wide reports, not game-day confirmed lineups.
+    if st.button('Refresh injuries', key='multi_refresh_injuries'):
+        st.session_state.pop('multi_injury_cache', None)
+    if 'multi_injury_cache' not in st.session_state:
+        try:
+            reports, updated, _ = nba_injury_reports()
+            st.session_state['multi_injury_cache'] = (reports, updated, None)
+        except Exception as exc:
+            st.session_state['multi_injury_cache'] = ({}, '', str(exc))
+    injury_reports, injury_updated, injury_error = st.session_state['multi_injury_cache']
+    if injury_error:
+        st.warning(f'Injury feed unavailable: {injury_error}. Availability cannot be confirmed.')
+    elif injury_updated:
+        st.caption(f'ESPN injury feed timestamp: {injury_updated} (UTC). Not a confirmed game-day lineup.')
+
+    # Use both teams' prior box scores. This is a pace PROXY because OREB is missing.
+    prior_players = p.copy()
+    prior_players['game_date'] = pd.to_datetime(prior_players['date'], errors='coerce').dt.date
+    prior_players = prior_players[(prior_players['game_date'].notna()) & (prior_players['game_date'] < matchup_date)]
+    prior_players = prior_players[prior_players['min'] > 0].copy()
+    pace_games = prior_players.groupby(['game_id','team_id'], as_index=False)[['fga','fta','tov','min']].sum()
+    pace_games['elapsed'] = pace_games['min'] / 5
+    pace_games['pace'] = ((pace_games['fga'] + 0.44 * pace_games['fta'] + pace_games['tov'])
+                          * 48 / pace_games['elapsed']).where(pace_games['elapsed'].between(40,60))
+    team_ids = (t.drop_duplicates('team').set_index('team')['team_id'].astype(str).to_dict())
+    pace_games['team_id'] = pace_games['team_id'].astype(str)
+    team_paces = pace_games.groupby('team_id')['pace'].mean()
+    league_pace = float(team_paces.dropna().mean()) if team_paces.notna().any() else float('nan')
+    selected_paces = [team_paces.get(team_ids.get(team)) for team in [away, home]]
+    if all(pd.notna(v) for v in selected_paces) and pd.notna(league_pace) and league_pace > 0:
+        matchup_pace = sum(selected_paces) / 2
+        pace_factor = max(0.90, min(1.10, matchup_pace / league_pace))
+        st.caption(f'Estimated pace proxy: {away} {selected_paces[0]:.1f} · {home} {selected_paces[1]:.1f} · league {league_pace:.1f}. Relative matchup adjustment {pace_factor:.3f}×.')
+    else:
+        pace_factor = 1.0
+        st.caption('Pace adjustment neutral: insufficient complete team box scores.')
+    st.caption('Pace is a proxy (FGA + 0.44×FTA + TOV per 48 minutes), NOT official possessions; missing offensive rebounds inflate its level. Only its relative ratio is used.')
+
+    # Position defence: compare what the SAME opposing players produced against a
+    # defence with their normal per-appearance averages, using strictly prior games.
+    valid_positions = {'PG','SG','SF','PF','C'}
+    defence_baselines = prior_players.groupby('player_id')[list(stats.values())].mean()
+    def position_defence_factor(opponent, position, stat):
+        if position not in valid_positions or stat not in defence_baselines.columns:
+            return 1.0, 0
+        against = prior_players[(prior_players['opponent'] == opponent) &
+                                (prior_players['position'] == position)].copy()
+        against['normal'] = against['player_id'].map(defence_baselines[stat])
+        against = against[against['normal'].notna() & (against['normal'] > 0)]
+        if against.empty:
+            return 1.0, 0
+        # Per-appearance production ratio, shrunk toward neutral with 20 samples.
+        actual, expected = against[stat].sum(), against['normal'].sum()
+        raw_ratio = actual / expected if expected > 0 else 1.0
+        reliability = len(against) / (len(against) + 20)
+        factor = max(.80, min(1.20, 1 + reliability * (raw_ratio - 1)))
+        return factor, len(against)
+
     if st.button('Analyse multi', type='primary', use_container_width=True):
         results = []
         leg_events = []
+        blocked = False
         for pid, stat, stat_name, direction, line in legs:
             player_games = roster_history[roster_history['player_id'].astype(str) == str(pid)].copy()
             player_games = player_games.sort_values(['game_date','game_id'], ascending=False).drop_duplicates('game_id')
             values = pd.to_numeric(player_games[stat], errors='coerce').dropna()
             if len(values) < 3:
-                st.warning(f'{players[pid]}: fewer than 3 historical appearances. Cannot estimate this multi reliably.')
-                st.stop()
-            hits = (values >= line) if direction == 'At least' else (values < line)
-            recent_hits = hits.head(recent_n)
-            # Shrink short-sample recent form toward the full-season hit rate.
-            # This is an explicit heuristic, NOT a calibrated probability model.
-            season_rate = hits.mean()
-            recent_rate = recent_hits.mean()
-            estimate = (len(recent_hits)*recent_rate + 12*season_rate)/(len(recent_hits)+12)
-            results.append({'Leg':f"{players[pid]} · {direction} {line} {stat_name}",
-                            'Games':len(hits), 'Season hit %':round(100*season_rate,1),
+                st.warning(f'{players[pid]}: fewer than 3 historical appearances. Cannot estimate this multi.')
+                blocked = True
+                continue
+            team = teams_by_player[pid]
+            opponent = home if team == away else away
+            position = str(player_games.iloc[0].get('position', '')).upper().strip()
+            def_factor, defence_n = position_defence_factor(opponent, position, stat)
+            # Points, rebounds, assists and counting stats can respond to possessions.
+            # Apply a conservative relative pace adjustment and cap total change.
+            total_factor = max(.75, min(1.25, pace_factor * def_factor))
+            # Shift each historical observation relative to its season mean. This
+            # preserves observed variability instead of treating the mean as certainty.
+            season_mean = float(values.mean())
+            shifted = (values + season_mean * (total_factor - 1)).clip(lower=0)
+            shifted_hits = (shifted >= line) if direction == 'At least' else (shifted < line)
+            raw_hits = (values >= line) if direction == 'At least' else (values < line)
+            recent_hits = shifted_hits.head(recent_n)
+            season_rate = float(raw_hits.mean())
+            recent_rate = float(raw_hits.head(recent_n).mean())
+            # Beta-binomial style smoothing: blend adjusted historical evidence
+            # with the unadjusted season baseline to limit short-sample swings.
+            adjusted_rate = float(shifted_hits.mean())
+            estimate = (len(shifted_hits)*adjusted_rate + 12*season_rate) / (len(shifted_hits)+12)
+            estimate = (len(recent_hits)*float(recent_hits.mean()) + 12*estimate)/(len(recent_hits)+12)
+            # Availability: an OUT/Doubtful/Questionable player is not assigned a
+            # numerical injury multiplier without minutes and lineup information.
+            team_id = str(team_ids.get(team, '')).replace('.0','')
+            matching = [r for r in injury_reports.get(team_id, []) if
+                        str(r.get('Player','')).casefold().strip() == str(players[pid]).casefold().strip()]
+            injury = matching[0].get('Status', 'Reported') if matching else ('Unknown (feed unavailable)' if injury_error else 'Not listed')
+            if matching and 'out' in str(injury).lower():
+                st.error(f'{players[pid]} is listed OUT by ESPN. Exclude this leg until availability is confirmed.')
+                blocked = True
+            elif matching:
+                st.warning(f'{players[pid]} injury listing: {injury}. Projection does not account for a potential minutes restriction.')
+            results.append({'Leg':f'{players[pid]} · {direction} {line} {stat_name}',
+                            'Games':len(values), 'Season hit %':round(100*season_rate,1),
                             f'Last {recent_n} hit %':round(100*recent_rate,1),
-                            'Estimated hit %':round(100*estimate,1)})
-            leg_events.append({'pid':str(pid), 'stat':stat, 'direction':direction, 'line':line,
-                               'estimate':float(estimate), 'games':player_games})
-        st.markdown('#### Individual legs')
-        st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
-        # Historical same-game co-hits are only meaningful for players who actually
-        # appeared in the SAME completed game. Never treat unrelated games as joint hits.
-        all_game_sets = [set(ev['games']['game_id'].astype(str)) for ev in leg_events]
-        common_ids = set.intersection(*all_game_sets) if all_game_sets else set()
-        joint_hits = []
-        for gid in common_ids:
-            outcomes = []
-            for ev in leg_events:
-                row = ev['games'][ev['games']['game_id'].astype(str) == gid]
-                if row.empty:
-                    break
-                val = float(row.iloc[0][ev['stat']])
-                outcomes.append(val >= ev['line'] if ev['direction']=='At least' else val < ev['line'])
-            if len(outcomes) == len(leg_events):
-                joint_hits.append(all(outcomes))
-        # Independent product is shown as a baseline only. Same-game legs can be
-        # correlated, so it is not represented as a validated joint prediction.
-        baseline = float(np.prod([ev['estimate'] for ev in leg_events]))
-        m1,m2 = st.columns(2)
-        m1.metric('Independence-model estimate*', f'{100*baseline:.1f}%')
-        if len(common_ids) >= 5:
-            empirical = float(np.mean(joint_hits))
-            m2.metric('Historical joint hit rate', f'{100*empirical:.1f}%')
-            st.caption(f'Historical joint hit rate: {sum(joint_hits)} of {len(joint_hits)} games where every selected player appeared together. Small samples can be highly unstable.')
+                            'Pace ×':round(pace_factor,3), 'Defence ×':round(def_factor,3),
+                            'Defence sample':defence_n, 'Injury status':injury,
+                            'Adjusted hit %':round(100*estimate,1)})
+            leg_events.append({'pid':str(pid), 'stat':stat, 'direction':direction,
+                               'line':line, 'estimate':float(estimate), 'games':player_games})
+        if results:
+            st.markdown('#### Individual legs')
+            st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
+        if blocked or len(leg_events) != len(legs):
+            st.warning('Combined estimate withheld because a selected player is OUT or has insufficient history.')
         else:
-            m2.metric('Historical joint hit rate', 'Insufficient data')
-            st.caption(f'Only {len(common_ids)} common historical games across these players; at least 5 are needed to display a joint hit rate.')
-        st.warning('*The independence-model estimate multiplies heuristic leg probabilities and DOES NOT account for same-game correlation, injuries, lineup changes, minutes restrictions, or uncertainty in the estimates. It is not a reliable prediction of the multi hitting.')
-        if len({(ev['pid'],ev['stat']) for ev in leg_events}) < len(leg_events):
-            st.info('Some legs concern the same player and statistic. They are strongly dependent; the independence estimate is especially misleading.')
-        st.caption('Players are drawn from their team’s most recent saved box score, not confirmed game-day lineups. Historical data is filtered to before the selected game to avoid look-ahead bias. The current pace proxy is not used because it omits offensive rebounds.')
+            all_game_sets = [set(ev['games']['game_id'].astype(str)) for ev in leg_events]
+            common_ids = set.intersection(*all_game_sets) if all_game_sets else set()
+            joint_hits = []
+            for gid in common_ids:
+                outcomes = []
+                for ev in leg_events:
+                    row = ev['games'][ev['games']['game_id'].astype(str) == gid]
+                    if row.empty: break
+                    val = float(row.iloc[0][ev['stat']])
+                    outcomes.append(val >= ev['line'] if ev['direction']=='At least' else val < ev['line'])
+                if len(outcomes) == len(leg_events): joint_hits.append(all(outcomes))
+            baseline = float(np.prod([ev['estimate'] for ev in leg_events]))
+            m1,m2 = st.columns(2)
+            m1.metric('Adjusted independence estimate*', f'{100*baseline:.1f}%')
+            if len(joint_hits) >= 5:
+                m2.metric('Historical joint hit rate', f'{100*float(np.mean(joint_hits)):.1f}%')
+                st.caption(f'{sum(joint_hits)} of {len(joint_hits)} common games hit all legs (unadjusted historical results).')
+            else:
+                m2.metric('Historical joint hit rate', 'Insufficient data')
+                st.caption(f'Only {len(joint_hits)} common historical games; 5 required to show a joint hit rate.')
+            if len({(ev['pid'],ev['stat']) for ev in leg_events}) < len(leg_events):
+                st.warning('Repeated player/stat legs are strongly dependent. The independence estimate is particularly misleading.')
+            st.warning('*Experimental, uncalibrated estimate. Pace and positional defence are capped heuristic adjustments to historical results, not validated predictive effects. Multiplying legs ignores correlations; injuries and minutes changes may substantially alter outcomes. Do not treat this as a reliable betting probability.')
+        st.caption('Historical inputs are restricted to before the selected matchup. Injury listings are current ESPN reports and may not describe availability on a historical game date.')
     st.stop()
 
 if st.session_state['page'] == 'Statistics':
